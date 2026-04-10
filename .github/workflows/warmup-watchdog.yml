@@ -1,0 +1,28 @@
+name: Claude Code Warmup Watchdog
+
+on:
+  schedule:
+    - cron: "45 4 * * 1-5" # 06:45 CEST — 30 min after main warmup
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger warmup if it did not run successfully today
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          since=$(date -u -d '60 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          successful_runs=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/warmup.yml/runs?created=>=${since}&status=success&per_page=1" \
+            --jq '.total_count')
+
+          if [ "$successful_runs" -eq 0 ]; then
+            echo "No successful warmup run in the last 60 minutes. Triggering warmup now..."
+            gh workflow run warmup.yml
+          else
+            echo "Warmup already completed successfully. Nothing to do."
+          fi
