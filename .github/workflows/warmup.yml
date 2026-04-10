@@ -12,7 +12,7 @@ concurrency:
 jobs:
   warmup:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 12
     steps:
       - name: Validate configuration
         env:
@@ -33,30 +33,41 @@ jobs:
         run: |
           mkdir -p ~/.claude
           echo '{"hasCompletedOnboarding":true}' > ~/.claude.json
-          output_file="$(mktemp)"
-          set +e
-          claude -p "hi" --model haiku --no-session-persistence >"$output_file" 2>&1
-          status=$?
-          set -e
-          cat "$output_file"
 
-          if [ $status -eq 0 ]; then
-            echo "Claude warmup request succeeded."
-            echo "✓ Warmup complete"
-            exit 0
-          fi
+          max_attempts=3
+          delay=120
 
-          if grep -Eiq "expired|unauthorized|invalid token|authentication|auth failed|login required|not logged in" "$output_file"; then
-            echo "Claude token appears invalid or expired."
-            echo "Run 'claude setup-token' locally and update the CLAUDE_OAUTH_TOKEN GitHub secret."
-            exit 1
-          fi
+          for attempt in $(seq 1 $max_attempts); do
+            echo "Attempt $attempt of $max_attempts..."
+            output_file="$(mktemp)"
+            set +e
+            claude -p "hi" --model haiku --no-session-persistence >"$output_file" 2>&1
+            status=$?
+            set -e
+            cat "$output_file"
 
-          if grep -qi "rate limit" "$output_file"; then
-            echo "Claude reported a rate limit; treating as warmup success."
-            echo "✓ Warmup complete"
-            exit 0
-          fi
+            if [ $status -eq 0 ]; then
+              echo "✓ Warmup complete"
+              exit 0
+            fi
 
-          echo "Claude warmup failed with an unexpected error."
-          exit $status
+            if grep -Eiq "expired|unauthorized|invalid token|authentication|auth failed|login required|not logged in" "$output_file"; then
+              echo "Claude token appears invalid or expired."
+              echo "Run 'claude setup-token' locally and update the CLAUDE_OAUTH_TOKEN GitHub secret."
+              exit 1
+            fi
+
+            if grep -qi "rate limit" "$output_file"; then
+              echo "Claude reported a rate limit; treating as warmup success."
+              echo "✓ Warmup complete"
+              exit 0
+            fi
+
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Attempt $attempt failed, retrying in ${delay}s..."
+              sleep $delay
+            fi
+          done
+
+          echo "Claude warmup failed after $max_attempts attempts."
+          exit 1
