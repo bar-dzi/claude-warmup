@@ -11,6 +11,7 @@ concurrency:
 
 jobs:
   warmup:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
